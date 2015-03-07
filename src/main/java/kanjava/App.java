@@ -126,6 +126,12 @@ public class App {
         return "Hello " + name;
     }
 
+    @MessageMapping(value = "/faceConverter")
+    void faceConverter(String base64Image) {
+        Message<byte[]> message = MessageBuilder.withPayload(Base64.getDecoder().decode(base64Image)).build();
+        jmsMessagingTemplate.send("faceConverter", message);
+    }
+
 //    @JmsListener(destination = "hello" /* 処理するメッセージの宛先を指定 */, concurrency = "1-5")
 //    void handleHelloMessage(Message<String> message /* 送信されたメッセージを受け取る */) {
 //        log.info("received! {}", message);
