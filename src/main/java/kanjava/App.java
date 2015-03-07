@@ -16,6 +16,7 @@ import org.springframework.jms.core.JmsMessagingTemplate;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.SendTo;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
@@ -27,19 +28,19 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.socket.config.annotation.AbstractWebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.WebSocketTransportRegistration;
 
 import javax.annotation.PostConstruct;
 import javax.imageio.ImageIO;
 import javax.servlet.http.Part;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
+import java.util.Base64;
 import java.util.function.BiConsumer;
 
 import static org.bytedeco.javacpp.opencv_core.*;
 import static org.bytedeco.javacpp.opencv_objdetect.*;
+import static org.bytedeco.javacpp.opencv_imgproc.*;
 
 @SpringBootApplication
 @RestController
@@ -54,6 +55,10 @@ public class App {
             FaceDetector faceDetector;
     @Autowired
     JmsMessagingTemplate jmsMessagingTemplate; // メッセージ操作用APIのJMSラッパー
+    @Autowired
+    SimpMessagingTemplate simpMessagingTemplate;
+    @Value("${faceduker.width:200}")
+    int resizedWidth; // リサイズ後の幅
 
     @Bean
         // HTTPのリクエスト・レスポンスボディにBufferedImageを使えるようにする
@@ -74,6 +79,11 @@ public class App {
         public void configureMessageBroker(MessageBrokerRegistry registry) {
             registry.setApplicationDestinationPrefixes("/app"); // Controllerに処理させる宛先のPrefix
             registry.enableSimpleBroker("/topic"); // queueまたはtopicを有効にする(両方可)。queueは1対1(P2P)、topicは1対多(Pub-Sub)
+        }
+
+        @Override
+        public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
+            registration.setMessageSizeLimit(10 * 1024 * 1024); // メッセージサイズの上限を10MBに上げる(デフォルトは64KB)
         }
     }
 
@@ -128,8 +138,20 @@ public class App {
         try (InputStream stream = new ByteArrayInputStream(message.getPayload())) { // byte[] -> InputStream
             Mat source = Mat.createFrom(ImageIO.read(stream)); // InputStream -> BufferedImage -> Mat
             faceDetector.detectFaces(source, FaceTranslator::duker);
-            BufferedImage image = source.getBufferedImage();
-            // do nothing...
+            // リサイズ
+            double ratio = ((double) resizedWidth) / source.cols();
+            int height = (int) (ratio * source.rows());
+            Mat out = new Mat(height, resizedWidth, source.type());
+            resize(source, out, new Size(), ratio, ratio, INTER_LINEAR);
+
+            BufferedImage image = out.getBufferedImage();
+            try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) { // BufferedImageをbyte[]に変換
+                ImageIO.write(image, "png", baos);
+                baos.flush();
+                // 画像をBase64にエンコードしてメッセージ作成し、宛先'/topic/faces'へメッセージ送信
+                simpMessagingTemplate.convertAndSend("/topic/faces",
+                        Base64.getEncoder().encodeToString(baos.toByteArray()));
+            }
         }
     }
 }
