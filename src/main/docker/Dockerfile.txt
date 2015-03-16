@@ -1,6 +1,12 @@
-FROM dockerfile/java:oracle-java8
+FROM centos:centos7
+RUN yum -y update && yum clean all
+RUN yum -y install wget glibc gtk2 gstreamer gstreamer-plugins-base libv4l
+RUN wget -c -O /tmp/jdk-8u31-linux-x64.rpm --no-check-certificate --no-cookies --header "Cookie: oraclelicense=accept-securebackup-cookie" http://download.oracle.com/otn-pub/java/jdk/8u31-b13/jdk-8u31-linux-x64.rpm
+RUN yum -y localinstall /tmp/jdk-8u31-linux-x64.rpm
+RUN rm -f /tmp/jdk-8u31-linux-x64.rpm
 
 ADD kusokora.jar /opt/kusokora/
+ADD classes/haarcascade_frontalface_default.xml /opt/kusokora/
 EXPOSE 8080
 WORKDIR /opt/kusokora/
-CMD ["java", "-Xms512m", "-Xmx1g", "-jar", "kusokora.jar"]
+CMD ["java", "-Xms512m", "-Xmx1g", "-jar", "kusokora.jar", "--classifierFile=haarcascade_frontalface_default.xml"]
